@@ -1,0 +1,26 @@
+{
+    "name": "karakushan/fs-wpmultilang-integration",
+    "description": "Integration layer between the website and WP Multilang functionality",
+    "type": "wordpress-plugin",
+    "license": "GPL-2.0-or-later",
+    "authors": [
+        {
+            "name": "Vitaliy Karakushan",
+            "email": "vitaliy@karakushan.com",
+            "homepage": "https://github.com/karakushan"
+        }
+    ],
+    "require": {
+        "php": ">=7.4"
+    },
+    "autoload": {
+        "psr-4": {
+            "FS_WPML\\": "includes/"
+        },
+        "classmap": [
+            "includes/"
+        ]
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
