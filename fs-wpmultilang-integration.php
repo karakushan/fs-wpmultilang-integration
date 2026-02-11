@@ -22,8 +22,11 @@ define('FS_WPMULTILANG_INTEGRATION_VERSION', '1.0.0');
 define('FS_WPMULTILANG_INTEGRATION_PATH', plugin_dir_path(__FILE__));
 define('FS_WPMULTILANG_INTEGRATION_URL', plugin_dir_url(__FILE__));
 
-// Load autoloader
-require_once FS_WPMULTILANG_INTEGRATION_PATH . 'vendor/autoload.php';
+// Load required class files directly
+require_once FS_WPMULTILANG_INTEGRATION_PATH . 'includes/fs-wpml-hreflang-handler.php';
+require_once FS_WPMULTILANG_INTEGRATION_PATH . 'includes/fs-wpml-language-switcher.php';
+require_once FS_WPMULTILANG_INTEGRATION_PATH . 'includes/fs-wpml-url-translator.php';
+require_once FS_WPMULTILANG_INTEGRATION_PATH . 'includes/class-fs-wpml-taxonomy-router.php';
 
 /**
  * Main plugin class
@@ -171,6 +174,14 @@ class FS_WPML_Integration {
         $this->setup_admin_features();
         $this->setup_hreflang_handler();
         $this->setup_url_translator();
+        $this->setup_taxonomy_router();
+        
+        // Handle flush_rewrite_rules via URL parameter
+        if (isset($_GET['flush_rewrite_rules']) && $_GET['flush_rewrite_rules'] === 'fs_wpmultilang') {
+            if (current_user_can('manage_options')) {
+                flush_rewrite_rules(true);
+            }
+        }
     }
 
     /**
@@ -211,6 +222,14 @@ class FS_WPML_Integration {
     private function setup_url_translator() {
         // Initialize URL translator
         FS_WPML_URL_Translator::get_instance();
+    }
+
+    /**
+     * Setup taxonomy router
+     */
+    private function setup_taxonomy_router() {
+        // Initialize taxonomy router for multilingual taxonomy URLs
+        FS_WPML_Taxonomy_Router::get_instance();
     }
 
     /**

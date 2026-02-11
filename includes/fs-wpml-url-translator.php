@@ -88,8 +88,10 @@ class FS_WPML_URL_Translator
             } else {
                 // Check if this is a product category URL
                 $term = get_term_by('slug', end($parts), 'catalog');
-                $localized_term_url = $this->get_term_url_by_language($term->term_id, $language);
-                return $localized_term_url ?: $new_url;
+                if ($term && !is_wp_error($term)) {
+                    $localized_term_url = $this->get_term_url_by_language($term->term_id, $language);
+                    return $localized_term_url ?: $new_url;
+                }
             }
         } else {
             // устанавливаем урл для товаров языка по умолчанию

@@ -14,6 +14,7 @@ All notable changes to FS WP Multilang Integration will be documented in this fi
 - Uninstall script for clean removal
 - Dedicated hreflang handler class (FS_WPML_Hreflang_Handler)
 - URL translator class (FS_WPML_URL_Translator) with full product, post, and category slug translation
+- Taxonomy router class (FS_WPML_Taxonomy_Router) with custom rewrite rules for multilingual taxonomy URLs
 
 ### Changed
 - Implemented Composer PSR-4 autoloading for class management
