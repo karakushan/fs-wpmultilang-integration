@@ -27,6 +27,7 @@ require_once FS_WPMULTILANG_INTEGRATION_PATH . 'includes/fs-wpml-hreflang-handle
 require_once FS_WPMULTILANG_INTEGRATION_PATH . 'includes/fs-wpml-language-switcher.php';
 require_once FS_WPMULTILANG_INTEGRATION_PATH . 'includes/fs-wpml-url-translator.php';
 require_once FS_WPMULTILANG_INTEGRATION_PATH . 'includes/class-fs-wpml-taxonomy-router.php';
+require_once FS_WPMULTILANG_INTEGRATION_PATH . 'includes/class-fs-wpml-term-meta.php';
 
 /**
  * Main plugin class
@@ -175,6 +176,7 @@ class FS_WPML_Integration {
         $this->setup_hreflang_handler();
         $this->setup_url_translator();
         $this->setup_taxonomy_router();
+        $this->setup_term_meta_handler();
         
         // Handle flush_rewrite_rules via URL parameter
         if (isset($_GET['flush_rewrite_rules']) && $_GET['flush_rewrite_rules'] === 'fs_wpmultilang') {
@@ -230,6 +232,14 @@ class FS_WPML_Integration {
     private function setup_taxonomy_router() {
         // Initialize taxonomy router for multilingual taxonomy URLs
         FS_WPML_Taxonomy_Router::get_instance();
+    }
+
+    /**
+     * Setup term meta handler
+     */
+    private function setup_term_meta_handler() {
+        // Initialize term meta handler for multilingual SEO fields
+        FS_WPML_Term_Meta_Handler::get_instance();
     }
 
     /**
