@@ -171,6 +171,9 @@ class FS_WPML_Integration {
             return;
         }
 
+        // Register term fields for WP Multilang translation
+        add_filter('wpm_term_fields_config', array($this, 'register_term_fields'));
+        
         // Add your integration logic here
         $this->setup_language_switching();
         $this->setup_content_filtering();
@@ -190,6 +193,25 @@ class FS_WPML_Integration {
                 flush_rewrite_rules(true);
             }
         }
+    }
+
+    /**
+     * Register term fields for WP Multilang translation
+     * 
+     * @param array $fields Existing term fields config
+     * @return array Modified term fields config
+     */
+    public function register_term_fields($fields) {
+        // SEO fields that need translation
+        $seo_fields = array(
+            '_content' => array(),
+            '_seo_title' => array(),
+            '_seo_description' => array(),
+            '_seo_slug' => array(),
+            'fs_seo_slug' => array(),
+        );
+        
+        return array_merge($fields, $seo_fields);
     }
 
     /**
