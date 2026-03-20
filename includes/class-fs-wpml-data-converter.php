@@ -42,33 +42,51 @@ class FS_WPML_Data_Converter
      */
     private $lang_suffixes = [
         'ru_ru' => 'ru',
-        'ru_ru_lower' => 'ru',  // ru_ru
-        'ru_ru_upper' => 'ru',  // ru_RU
         'uk' => 'ua',
         'en_us' => 'en',
-        'en_us_upper' => 'en',  // en_US
     ];
 
     /**
-     * Get all possible suffix variants for a base suffix
+     * Get all possible case variants for a suffix
      * 
-     * @param string $base_suffix Base suffix like 'ru_ru'
-     * @return array Array of possible suffix variants
+     * @param string $suffix Base suffix like 'ru_ru'
+     * @return array Array of possible suffix variants (ru_ru, ru_RU, RU_RU, etc.)
      */
-    private function get_suffix_variants($base_suffix)
+    private function get_suffix_case_variants($suffix)
     {
-        $variants = [$base_suffix];
+        $variants = [$suffix];
         
-        // Add case variants
-        $parts = explode('_', $base_suffix);
+        $parts = explode('_', $suffix);
         if (count($parts) === 2) {
             // ru_ru -> ru_RU
             $variants[] = $parts[0] . '_' . strtoupper($parts[1]);
-            // ru_RU -> RU_RU
+            // ru_ru -> RU_ru  
+            $variants[] = strtoupper($parts[0]) . '_' . $parts[1];
+            // ru_ru -> RU_RU
             $variants[] = strtoupper($parts[0]) . '_' . strtoupper($parts[1]);
         }
         
         return array_unique($variants);
+    }
+
+    /**
+     * Get all suffix patterns for SQL query (including case variants)
+     * 
+     * @param string $field Base field name
+     * @return array Array of full meta_key patterns
+     */
+    private function get_all_suffix_patterns($field)
+    {
+        $patterns = [];
+        
+        foreach ($this->lang_suffixes as $suffix => $lang_code) {
+            $variants = $this->get_suffix_case_variants($suffix);
+            foreach ($variants as $variant) {
+                $patterns[] = $field . '__' . $variant;
+            }
+        }
+        
+        return $patterns;
     }
 
     /**
@@ -196,11 +214,8 @@ class FS_WPML_Data_Converter
             'messages' => []
         ];
 
-        // Get all unique object IDs that have meta fields with language suffixes
-        $suffixes = array_keys($this->lang_suffixes);
-        $suffix_patterns = array_map(function($s) use ($field) {
-            return $field . '__' . $s;
-        }, $suffixes);
+        // Get all suffix patterns including case variants
+        $suffix_patterns = $this->get_all_suffix_patterns($field);
 
         $in_clause = implode(',', array_map(function($p) use ($wpdb) {
             return $wpdb->prepare('%s', $p);
@@ -219,19 +234,24 @@ class FS_WPML_Data_Converter
         foreach ($object_ids as $object_id) {
             $stats['processed']++;
 
-            // Collect values for each language
+            // Collect values for each language (check all case variants)
             $values = [];
             foreach ($this->lang_suffixes as $suffix => $lang_code) {
-                $suffixed_key = $field . '__' . $suffix;
+                $case_variants = $this->get_suffix_case_variants($suffix);
                 
-                if ($table === $wpdb->termmeta) {
-                    $value = get_term_meta($object_id, $suffixed_key, true);
-                } else {
-                    $value = get_post_meta($object_id, $suffixed_key, true);
-                }
+                foreach ($case_variants as $variant) {
+                    $suffixed_key = $field . '__' . $variant;
+                    
+                    if ($table === $wpdb->termmeta) {
+                        $value = get_term_meta($object_id, $suffixed_key, true);
+                    } else {
+                        $value = get_post_meta($object_id, $suffixed_key, true);
+                    }
 
-                if (!empty($value)) {
-                    $values[$lang_code] = $value;
+                    if (!empty($value)) {
+                        $values[$lang_code] = $value;
+                        break; // Found value, no need to check other variants
+                    }
                 }
             }
 
@@ -265,14 +285,18 @@ class FS_WPML_Data_Converter
                 continue;
             }
 
-            // Delete old suffixed meta fields
+            // Delete old suffixed meta fields (all case variants)
             foreach ($this->lang_suffixes as $suffix => $lang_code) {
-                $suffixed_key = $field . '__' . $suffix;
+                $case_variants = $this->get_suffix_case_variants($suffix);
                 
-                if ($table === $wpdb->termmeta) {
-                    delete_term_meta($object_id, $suffixed_key);
-                } else {
-                    delete_post_meta($object_id, $suffixed_key);
+                foreach ($case_variants as $variant) {
+                    $suffixed_key = $field . '__' . $variant;
+                    
+                    if ($table === $wpdb->termmeta) {
+                        delete_term_meta($object_id, $suffixed_key);
+                    } else {
+                        delete_post_meta($object_id, $suffixed_key);
+                    }
                 }
             }
 
@@ -364,10 +388,7 @@ class FS_WPML_Data_Converter
         $id_column = $type === 'term' ? 'term_id' : 'post_id';
 
         foreach ($fields as $field) {
-            $suffixes = array_keys($this->lang_suffixes);
-            $suffix_patterns = array_map(function($s) use ($field) {
-                return $field . '__' . $s;
-            }, $suffixes);
+            $suffix_patterns = $this->get_all_suffix_patterns($field);
 
             $in_clause = implode(',', array_map(function($p) use ($wpdb) {
                 return $wpdb->prepare('%s', $p);
