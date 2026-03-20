@@ -29,6 +29,7 @@ require_once FS_WPMULTILANG_INTEGRATION_PATH . 'includes/fs-wpml-url-translator.
 require_once FS_WPMULTILANG_INTEGRATION_PATH . 'includes/class-fs-wpml-taxonomy-router.php';
 require_once FS_WPMULTILANG_INTEGRATION_PATH . 'includes/class-fs-wpml-term-meta.php';
 require_once FS_WPMULTILANG_INTEGRATION_PATH . 'includes/class-fs-wpml-data-converter.php';
+require_once FS_WPMULTILANG_INTEGRATION_PATH . 'includes/class-fs-wpml-fshop-registration.php';
 require_once FS_WPMULTILANG_INTEGRATION_PATH . 'admin/class-converter-admin.php';
 
 /**
@@ -101,6 +102,10 @@ class FS_WPML_Integration {
             wp_die(__('This plugin requires WP Multilang to be installed and active.', 'fs-wpmultilang-integration'));
         }
 
+        // Clear WP Multilang cache to ensure new post types are recognized
+        wp_cache_delete('config', 'wpm');
+        wp_cache_delete('active_plugins', 'wpm');
+
         // Add activation logic here
         $this->create_default_options();
         flush_rewrite_rules();
@@ -169,6 +174,11 @@ class FS_WPML_Integration {
     public function init_integration() {
         if (!$this->check_wp_multilang_dependency()) {
             return;
+        }
+
+        // Clear WP Multilang cache in admin to ensure fresh config
+        if (is_admin()) {
+            wp_cache_delete('config', 'wpm');
         }
 
         // Register term fields for WP Multilang translation
