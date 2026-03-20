@@ -28,6 +28,8 @@ require_once FS_WPMULTILANG_INTEGRATION_PATH . 'includes/fs-wpml-language-switch
 require_once FS_WPMULTILANG_INTEGRATION_PATH . 'includes/fs-wpml-url-translator.php';
 require_once FS_WPMULTILANG_INTEGRATION_PATH . 'includes/class-fs-wpml-taxonomy-router.php';
 require_once FS_WPMULTILANG_INTEGRATION_PATH . 'includes/class-fs-wpml-term-meta.php';
+require_once FS_WPMULTILANG_INTEGRATION_PATH . 'includes/class-fs-wpml-data-converter.php';
+require_once FS_WPMULTILANG_INTEGRATION_PATH . 'admin/class-converter-admin.php';
 
 /**
  * Main plugin class
@@ -178,6 +180,10 @@ class FS_WPML_Integration {
         $this->setup_taxonomy_router();
         $this->setup_term_meta_handler();
         
+        // Initialize data converter
+        FS_WPML_Data_Converter::get_instance();
+        FS_WPML_Converter_Admin::get_instance();
+        
         // Handle flush_rewrite_rules via URL parameter
         if (isset($_GET['flush_rewrite_rules']) && $_GET['flush_rewrite_rules'] === 'fs_wpmultilang') {
             if (current_user_can('manage_options')) {
@@ -259,13 +265,9 @@ class FS_WPML_Integration {
      * Admin page callback
      */
     public function admin_page() {
-        ?>
-        <div class="wrap">
-            <h1><?php _e('FS WP Multilang Integration Settings', 'fs-wpmultilang-integration'); ?></h1>
-            <p><?php _e('Configure the integration settings for WP Multilang.', 'fs-wpmultilang-integration'); ?></p>
-            <!-- Add your settings form here -->
-        </div>
-        <?php
+        // Delegate to converter admin
+        $admin = FS_WPML_Converter_Admin::get_instance();
+        $admin->render_page();
     }
 
     /**
