@@ -64,12 +64,11 @@ class FS_WPML_URL_Translator
         $path = parse_url($url, PHP_URL_PATH);
         $path = trim($path, '/');
         $parts = explode('/', $path);
+        $slug = end($parts);
 
         if ($language != 'ua') {
             // Check if this is a product URL
             if (count($parts) >= 2 && $parts[0] === 'product') {
-                $slug = end($parts);
-
                 // Check if product exists
                 global $wpdb;
                 $post = $wpdb->get_row($wpdb->prepare(
@@ -86,9 +85,15 @@ class FS_WPML_URL_Translator
                     return $localized_post_url ?: $new_url;
                 }
             } else {
-                // Check if this is a product category URL
-                $term = get_term_by('slug', end($parts), 'catalog');
-                if ($term && !is_wp_error($term)) {
+                // Check if this is a product category URL - получаем термин напрямую из базы
+                global $wpdb;
+                $term = $wpdb->get_row($wpdb->prepare(
+                    "SELECT t.term_id FROM {$wpdb->terms} t 
+                    JOIN {$wpdb->term_taxonomy} tt ON t.term_id = tt.term_id 
+                    WHERE t.slug = %s AND tt.taxonomy = 'catalog'",
+                    $slug
+                ));
+                if ($term) {
                     $localized_term_url = $this->get_term_url_by_language($term->term_id, $language);
                     return $localized_term_url ?: $new_url;
                 }
@@ -96,11 +101,8 @@ class FS_WPML_URL_Translator
         } else {
             // устанавливаем урл для товаров языка по умолчанию
             if (count($parts) === 3 && $parts[1] === 'product') {
-                $slug = end($parts);
-                
                 $object = get_queried_object();
 
-                
                 if ($object instanceof WP_Post) {
                     $url_components = [
                         site_url(),
@@ -114,8 +116,6 @@ class FS_WPML_URL_Translator
 
             // устанавливаем урл для терминов языка по умолчанию
             if (count($parts) === 2 && $parts[1] !== 'product') {
-                $slug = end($parts);
-                
                 $object = get_queried_object();
 
                 if ($object instanceof WP_Term) {
@@ -145,7 +145,13 @@ class FS_WPML_URL_Translator
      */
     public function get_post_url_by_language($post_id, $language, $post_type = 'product')
     {
-        $slug_string = get_post_meta($post_id, 'fs_seo_slug', true);
+        // Получаем сырое значение напрямую из базы, минуя фильтры WPM
+        global $wpdb;
+        $slug_string = $wpdb->get_var($wpdb->prepare(
+            "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = 'fs_seo_slug'",
+            $post_id
+        ));
+        
         $slug_array = $slug_string ? wpm_string_to_ml_array($slug_string) : [];
         $current_language_slug = isset($slug_array[$language]) ? $slug_array[$language] : '';
         if ($current_language_slug) {
@@ -169,8 +175,13 @@ class FS_WPML_URL_Translator
      */
     public function get_term_url_by_language($term_id, $language)
     {
-
-        $slug_string = get_term_meta($term_id, '_seo_slug', true);
+        // Получаем сырое значение напрямую из базы, минуя фильтры WPM
+        global $wpdb;
+        $slug_string = $wpdb->get_var($wpdb->prepare(
+            "SELECT meta_value FROM {$wpdb->termmeta} WHERE term_id = %d AND meta_key = '_seo_slug'",
+            $term_id
+        ));
+        
         $slug_array = $slug_string ? wpm_string_to_ml_array($slug_string) : [];
 
         if (!empty($slug_array[$language])) {

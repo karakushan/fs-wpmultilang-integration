@@ -53,6 +53,9 @@ class FS_WPML_Taxonomy_Router
     {
         // Add rewrite rules for translated taxonomy slugs
         add_action('generate_rewrite_rules', array($this, 'add_taxonomy_rewrite_rules'), 20);
+
+        // Normalize generic requests early before WP builds the main query
+        add_filter('request', array($this, 'filter_translated_taxonomy_request'), 1);
         
         // Handle requests for translated taxonomy URLs
         add_action('parse_request', array($this, 'parse_translated_taxonomy_request'), 10, 1);
@@ -103,17 +106,18 @@ class FS_WPML_Taxonomy_Router
             foreach ($terms as $term) {
                 // Get the translated slug for this language
                 $translated_slug = $this->get_translated_slug($term->term_id, $lang_code);
-                
                 if (empty($translated_slug) || $translated_slug === $term->slug) {
                     continue;
                 }
 
                 // Add rewrite rule for translated slug
                 // Pattern: ru/muzhskie-zonty-vinnica/
-                $rules[$lang_prefix . '/' . $translated_slug . '/?$'] = 'index.php?catalog=' . $term->slug . '&lang=' . $lang_code;
+                $quoted_slug = preg_quote($translated_slug, '~');
+                $quoted_prefix = preg_quote($lang_prefix, '~');
+                $rules['^' . $quoted_prefix . '/' . $quoted_slug . '/?$'] = 'index.php?catalog=' . $term->slug . '&lang=' . $lang_code;
                 
                 // Add pagination rule
-                $rules[$lang_prefix . '/' . $translated_slug . '/page/([0-9]{1,})/?$'] = 'index.php?catalog=' . $term->slug . '&paged=$matches[1]&lang=' . $lang_code;
+                $rules['^' . $quoted_prefix . '/' . $quoted_slug . '/page/([0-9]{1,})/?$'] = 'index.php?catalog=' . $term->slug . '&paged=$matches[1]&lang=' . $lang_code;
             }
         }
 
@@ -121,6 +125,56 @@ class FS_WPML_Taxonomy_Router
         $wp_rewrite->rules = $rules + $wp_rewrite->rules;
 
         return $wp_rewrite->rules;
+    }
+
+    public function filter_translated_taxonomy_request($query_vars)
+    {
+        if (!function_exists('wpm_get_languages') || !function_exists('wpm_get_default_language')) {
+            return $query_vars;
+        }
+
+        $request_path = wp_parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+        $request_uri = trim((string) $request_path, '/');
+        $parts = explode('/', $request_uri);
+
+        if (count($parts) < 2) {
+            return $query_vars;
+        }
+
+        $languages = wpm_get_languages();
+        $default_lang = wpm_get_default_language();
+        $lang_prefix = $parts[0];
+        $requested_slug = $parts[1];
+        $lang_code = null;
+
+        foreach ($languages as $code => $data) {
+            if ((isset($data['slug']) && $data['slug'] === $lang_prefix) || $code === $lang_prefix) {
+                $lang_code = $code;
+                break;
+            }
+        }
+
+        if (empty($lang_code) || $lang_code === $default_lang) {
+            return $query_vars;
+        }
+
+        $term = $this->get_term_by_translated_slug($requested_slug, $lang_code);
+        if (!$term || is_wp_error($term)) {
+            return $query_vars;
+        }
+
+        $clean_query = [
+            'catalog' => $term->slug,
+            'lang' => $lang_code,
+            'taxonomy' => 'catalog',
+            'term' => $term->slug,
+        ];
+
+        if (isset($parts[2]) && $parts[2] === 'page' && isset($parts[3]) && is_numeric($parts[3])) {
+            $clean_query['paged'] = intval($parts[3]);
+        }
+
+        return $clean_query;
     }
 
     /**
@@ -139,7 +193,8 @@ class FS_WPML_Taxonomy_Router
             return;
         }
 
-        $request_uri = trim($_SERVER['REQUEST_URI'], '/');
+        $request_path = wp_parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+        $request_uri = trim((string) $request_path, '/');
         $parts = explode('/', $request_uri);
 
         // Need at least 2 parts: language prefix and slug
@@ -179,9 +234,15 @@ class FS_WPML_Taxonomy_Router
         $term = $this->get_term_by_translated_slug($requested_slug, $lang_code);
 
         if ($term && !is_wp_error($term)) {
+            // The request may already be matched by a generic page/post rule.
+            // Clear singular query vars so WordPress treats it as a taxonomy archive.
+            unset($wp->query_vars['name'], $wp->query_vars['pagename'], $wp->query_vars['attachment']);
+
             // Set the query vars for the taxonomy archive
             $wp->query_vars['catalog'] = $term->slug;
             $wp->query_vars['lang'] = $lang_code;
+            $wp->query_vars['taxonomy'] = 'catalog';
+            $wp->query_vars['term'] = $term->slug;
             
             // Handle pagination
             if (isset($parts[2]) && $parts[2] === 'page' && isset($parts[3]) && is_numeric($parts[3])) {
@@ -205,7 +266,15 @@ class FS_WPML_Taxonomy_Router
             return $this->term_cache[$cache_key];
         }
 
-        $slug_string = get_term_meta($term_id, '_seo_slug', true);
+        global $wpdb;
+        
+        // Получаем мета-данные напрямую из базы данных
+        $slug_string = $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT meta_value FROM {$wpdb->termmeta} WHERE term_id = %d AND meta_key = '_seo_slug' LIMIT 1",
+                $term_id
+            )
+        );
         
         if (empty($slug_string) || !function_exists('wpm_string_to_ml_array')) {
             $this->term_cache[$cache_key] = null;
