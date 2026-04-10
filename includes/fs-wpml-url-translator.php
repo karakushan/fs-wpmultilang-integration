@@ -62,70 +62,33 @@ class FS_WPML_URL_Translator
     public function translate_url($new_url, $language, $url)
     {
         $path = parse_url($url, PHP_URL_PATH);
-        $path = trim($path, '/');
-        $parts = explode('/', $path);
-        $slug = end($parts);
+        $parts = $this->get_path_parts($path);
 
-        if ($language != 'ua') {
-            // Check if this is a product URL
-            if (count($parts) >= 2 && $parts[0] === 'product') {
-                // Check if product exists
-                global $wpdb;
-                $post = $wpdb->get_row($wpdb->prepare(
-                    "SELECT ID, post_type FROM {$wpdb->posts} 
-                    WHERE post_name = %s 
-                    AND post_type = 'product' 
-                    AND post_status = 'publish'
-                    LIMIT 1",
-                    $slug
-                ));
+        if (empty($parts)) {
+            return $new_url;
+        }
 
-                if ($post) {
-                    $localized_post_url = $this->get_post_url_by_language($post->ID, $language, $post->post_type);
-                    return $localized_post_url ?: $new_url;
-                }
-            } else {
-                // Check if this is a product category URL - получаем термин напрямую из базы
-                global $wpdb;
-                $term = $wpdb->get_row($wpdb->prepare(
-                    "SELECT t.term_id FROM {$wpdb->terms} t 
-                    JOIN {$wpdb->term_taxonomy} tt ON t.term_id = tt.term_id 
-                    WHERE t.slug = %s AND tt.taxonomy = 'catalog'",
-                    $slug
-                ));
-                if ($term) {
-                    $localized_term_url = $this->get_term_url_by_language($term->term_id, $language);
-                    return $localized_term_url ?: $new_url;
-                }
-            }
-        } else {
-            // устанавливаем урл для товаров языка по умолчанию
-            if (count($parts) === 3 && $parts[1] === 'product') {
-                $object = get_queried_object();
+        if ($parts[0] === 'product' && !empty($parts[1])) {
+            $post = $this->get_product_by_slug($parts[1]);
 
-                if ($object instanceof WP_Post) {
-                    $url_components = [
-                        site_url(),
-                        'product',
-                        $object->post_name
-                    ];
-                    $url = implode('/', $url_components);
-                    return $url . '/';
+            if ($post) {
+                $localized_post_url = $this->get_post_url_by_language($post->ID, $language, $post->post_type);
+
+                if ($localized_post_url) {
+                    return $this->append_remaining_path_segments($localized_post_url, array_slice($parts, 2));
                 }
             }
 
-            // устанавливаем урл для терминов языка по умолчанию
-            if (count($parts) === 2 && $parts[1] !== 'product') {
-                $object = get_queried_object();
+            return $new_url;
+        }
 
-                if ($object instanceof WP_Term) {
-                    $url_components = [
-                        site_url(),
-                        $object->slug
-                    ];
-                    $url = implode('/', $url_components);
-                    return $url . '/';
-                }
+        $term = $this->get_catalog_term_by_slug($parts[0]);
+
+        if ($term) {
+            $localized_term_url = $this->get_term_url_by_language($term->term_id, $language);
+
+            if ($localized_term_url) {
+                return $this->append_remaining_path_segments($localized_term_url, array_slice($parts, 1));
             }
         }
 
@@ -145,6 +108,25 @@ class FS_WPML_URL_Translator
      */
     public function get_post_url_by_language($post_id, $language, $post_type = 'product')
     {
+        $default_language = function_exists('wpm_get_default_language')
+            ? strtolower((string) wpm_get_default_language())
+            : 'ua';
+        $language = strtolower((string) $language);
+
+        if ($post_type !== 'product') {
+            return null;
+        }
+
+        if ($language === $default_language || $language === '') {
+            $post = get_post($post_id);
+
+            if ($post instanceof WP_Post && $post->post_type === 'product') {
+                return trailingslashit(implode('/', [site_url(), 'product', $post->post_name]));
+            }
+
+            return null;
+        }
+
         // Получаем сырое значение напрямую из базы, минуя фильтры WPM
         global $wpdb;
         $slug_string = $wpdb->get_var($wpdb->prepare(
@@ -175,6 +157,21 @@ class FS_WPML_URL_Translator
      */
     public function get_term_url_by_language($term_id, $language)
     {
+        $default_language = function_exists('wpm_get_default_language')
+            ? strtolower((string) wpm_get_default_language())
+            : 'ua';
+        $language = strtolower((string) $language);
+
+        if ($language === $default_language || $language === '') {
+            $term = get_term($term_id, 'catalog');
+
+            if ($term instanceof WP_Term) {
+                return trailingslashit(implode('/', [site_url(), $term->slug]));
+            }
+
+            return null;
+        }
+
         // Получаем сырое значение напрямую из базы, минуя фильтры WPM
         global $wpdb;
         $slug_string = $wpdb->get_var($wpdb->prepare(
@@ -193,5 +190,145 @@ class FS_WPML_URL_Translator
         }
 
         return null;
+    }
+
+    /**
+     * Get normalized URL path parts without a language prefix.
+     *
+     * @param string|null $path URL path.
+     * @return array
+     */
+    private function get_path_parts($path)
+    {
+        $parts = array_values(array_filter(explode('/', trim((string) $path, '/')), 'strlen'));
+
+        if (empty($parts) || !function_exists('wpm_get_languages')) {
+            return $parts;
+        }
+
+        $available_languages = array_map('strtolower', array_keys(wpm_get_languages()));
+
+        if (in_array(strtolower($parts[0]), $available_languages, true)) {
+            array_shift($parts);
+        }
+
+        return array_values($parts);
+    }
+
+    /**
+     * Find product by original or translated slug.
+     *
+     * @param string $slug Product slug from current URL.
+     * @return object|null
+     */
+    private function get_product_by_slug($slug)
+    {
+        global $wpdb;
+
+        $post = $wpdb->get_row($wpdb->prepare(
+            "SELECT ID, post_type FROM {$wpdb->posts}
+            WHERE post_name = %s
+            AND post_type = 'product'
+            AND post_status = 'publish'
+            LIMIT 1",
+            $slug
+        ));
+
+        if ($post) {
+            return $post;
+        }
+
+        if (!function_exists('wpm_string_to_ml_array')) {
+            return null;
+        }
+
+        $meta_rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT pm.post_id, pm.meta_value
+            FROM {$wpdb->postmeta} pm
+            INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
+            WHERE pm.meta_key = 'fs_seo_slug'
+            AND p.post_type = 'product'
+            AND p.post_status = 'publish'
+            AND pm.meta_value LIKE %s",
+            '%' . $wpdb->esc_like($slug) . '%'
+        ));
+
+        foreach ($meta_rows as $meta_row) {
+            $slug_array = wpm_string_to_ml_array($meta_row->meta_value);
+
+            if (in_array($slug, $slug_array, true)) {
+                return (object) [
+                    'ID' => (int) $meta_row->post_id,
+                    'post_type' => 'product',
+                ];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Find catalog term by original or translated slug.
+     *
+     * @param string $slug Term slug from current URL.
+     * @return object|null
+     */
+    private function get_catalog_term_by_slug($slug)
+    {
+        global $wpdb;
+
+        $term = $wpdb->get_row($wpdb->prepare(
+            "SELECT t.term_id
+            FROM {$wpdb->terms} t
+            INNER JOIN {$wpdb->term_taxonomy} tt ON tt.term_id = t.term_id
+            WHERE t.slug = %s
+            AND tt.taxonomy = 'catalog'
+            LIMIT 1",
+            $slug
+        ));
+
+        if ($term) {
+            return $term;
+        }
+
+        if (!function_exists('wpm_string_to_ml_array')) {
+            return null;
+        }
+
+        $meta_rows = $wpdb->get_results($wpdb->prepare(
+            "SELECT term_id, meta_value
+            FROM {$wpdb->termmeta}
+            WHERE meta_key = '_seo_slug'
+            AND meta_value LIKE %s",
+            '%' . $wpdb->esc_like($slug) . '%'
+        ));
+
+        foreach ($meta_rows as $meta_row) {
+            $slug_array = wpm_string_to_ml_array($meta_row->meta_value);
+
+            if (in_array($slug, $slug_array, true)) {
+                return (object) [
+                    'term_id' => (int) $meta_row->term_id,
+                ];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Append remaining path segments, for example pagination.
+     *
+     * @param string $url Base translated URL.
+     * @param array $segments Remaining path segments.
+     * @return string
+     */
+    private function append_remaining_path_segments($url, array $segments)
+    {
+        if (empty($segments)) {
+            return $url;
+        }
+
+        return trailingslashit(untrailingslashit($url) . '/' . implode('/', $segments));
     }
 }
