@@ -54,6 +54,9 @@ class FS_WPML_Taxonomy_Router
         // Add rewrite rules for translated taxonomy slugs
         add_action('generate_rewrite_rules', array($this, 'add_taxonomy_rewrite_rules'), 20);
 
+        // Validate localized catalog requests on frontend
+        add_action('template_redirect', array($this, 'redirect_to_localized_catalog_url'), 10);
+
         // Normalize generic requests early before WP builds the main query
         add_filter('request', array($this, 'filter_translated_taxonomy_request'), 1);
         
@@ -106,7 +109,7 @@ class FS_WPML_Taxonomy_Router
             foreach ($terms as $term) {
                 // Get the translated slug for this language
                 $translated_slug = $this->get_translated_slug($term->term_id, $lang_code);
-                if (empty($translated_slug) || $translated_slug === $term->slug) {
+                if (empty($translated_slug)) {
                     continue;
                 }
 
@@ -252,6 +255,48 @@ class FS_WPML_Taxonomy_Router
     }
 
     /**
+     * Redirect to localized catalog URL with support for duplicate slugs across languages.
+     *
+     * @return void
+     */
+    public function redirect_to_localized_catalog_url()
+    {
+        global $wp_query;
+
+        if (is_admin() || !is_tax(array('category', 'catalog')) || !function_exists('wpm_get_languages')) {
+            return;
+        }
+
+        $term = get_queried_object();
+        if (!$term || is_wp_error($term)) {
+            return;
+        }
+
+        $ml_slugs = $this->get_term_slug_map($term->term_id);
+        if (empty($ml_slugs)) {
+            return;
+        }
+
+        $request_uri_path = wp_parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+        $term_url_part = preg_replace('~/(page|paged)/.*$~', '', $request_uri_path);
+        $path_parts = array_values(array_filter(explode('/', $term_url_part)));
+        $url_term_slug = end($path_parts);
+        $current_lang_code = wpm_get_language();
+        $current_lang_slug = isset($ml_slugs[$current_lang_code]) ? trim((string) $ml_slugs[$current_lang_code]) : '';
+
+        if ($current_lang_slug !== '' && $current_lang_slug === $url_term_slug) {
+            return;
+        }
+
+        $slug_lang_code = array_search($url_term_slug, $ml_slugs, true);
+
+        if ($slug_lang_code && $slug_lang_code !== $current_lang_code) {
+            $wp_query->set_404();
+            status_header(404);
+        }
+    }
+
+    /**
      * Get translated slug for a term
      *
      * @param int $term_id Term ID.
@@ -277,16 +322,71 @@ class FS_WPML_Taxonomy_Router
         );
         
         if (empty($slug_string) || !function_exists('wpm_string_to_ml_array')) {
-            $this->term_cache[$cache_key] = null;
-            return null;
+            $translated_slug = $this->get_legacy_translated_slug($term_id, $lang_code);
+            $this->term_cache[$cache_key] = $translated_slug;
+
+            return $translated_slug;
         }
 
         $slug_array = wpm_string_to_ml_array($slug_string);
-        $translated_slug = isset($slug_array[$lang_code]) ? $slug_array[$lang_code] : null;
+        $translated_slug = isset($slug_array[$lang_code]) ? trim((string) $slug_array[$lang_code]) : '';
+
+        if ($translated_slug === '') {
+            $translated_slug = $this->get_legacy_translated_slug($term_id, $lang_code);
+        }
         
         $this->term_cache[$cache_key] = $translated_slug;
         
         return $translated_slug;
+    }
+
+    /**
+     * Get translated slug from legacy term meta fields.
+     *
+     * @param int $term_id Term ID.
+     * @param string $lang_code Language code.
+     * @return string|null Legacy translated slug or null if not found.
+     */
+    private function get_legacy_translated_slug($term_id, $lang_code)
+    {
+        if (!function_exists('wpm_get_languages')) {
+            return null;
+        }
+
+        $languages = wpm_get_languages();
+        if (empty($languages[$lang_code]['locale'])) {
+            return null;
+        }
+
+        $meta_key = '_seo_slug__' . mb_strtolower($languages[$lang_code]['locale']);
+        $legacy_slug = trim((string) get_term_meta($term_id, $meta_key, true));
+
+        return $legacy_slug !== '' ? $legacy_slug : null;
+    }
+
+    /**
+     * Build a language => slug map for the term using multilang and legacy fields.
+     *
+     * @param int $term_id Term ID.
+     * @return array
+     */
+    private function get_term_slug_map($term_id)
+    {
+        if (!function_exists('wpm_get_languages')) {
+            return array();
+        }
+
+        $slug_map = array();
+
+        foreach (wpm_get_languages() as $lang_code => $lang_data) {
+            $translated_slug = $this->get_translated_slug($term_id, $lang_code);
+
+            if ($translated_slug !== null && $translated_slug !== '') {
+                $slug_map[$lang_code] = $translated_slug;
+            }
+        }
+
+        return $slug_map;
     }
 
     /**
