@@ -372,13 +372,23 @@ class FS_WPML_Taxonomy_Router
      */
     private function get_term_slug_map($term_id)
     {
-        if (!function_exists('wpm_get_languages')) {
+        if (!function_exists('wpm_get_languages') || !function_exists('wpm_get_default_language')) {
             return array();
         }
 
         $slug_map = array();
+        $default_lang = wpm_get_default_language();
+        $term = get_term($term_id, 'catalog');
+
+        if ($term instanceof WP_Term && $term->slug !== '') {
+            $slug_map[$default_lang] = $term->slug;
+        }
 
         foreach (wpm_get_languages() as $lang_code => $lang_data) {
+            if ($lang_code === $default_lang) {
+                continue;
+            }
+
             $translated_slug = $this->get_translated_slug($term_id, $lang_code);
 
             if ($translated_slug !== null && $translated_slug !== '') {
